@@ -88,6 +88,12 @@ Em **Ferramentas (Tools) > Core Debug Level**:
 3. Configure o Universo Art-Net pretendido (Padrão: `0`).
 
 ### 2. Softwares Recomendados
+
+> [!TIP]
+> **🌟 EDIÇÃO ESPECIAL QLC+ (Recomendado)**
+> Disponibilizamos uma versão customizada (Fork) do **QLC+** otimizada especificamente para trabalhar em perfeita harmonia com este Node. Se procura a melhor experiência de uso e estabilidade, descarregue a nossa versão aqui:
+> 👉 **[Download da Nossa Fork do QLC+](https://github.com/EricNakamura/qlcplus-LEGACY)**
+
 O Node funciona com qualquer software compatível com o protocolo Art-Net I, II, III ou IV:
 * **QLC+**
 * **Lumikit**
