@@ -90,6 +90,7 @@ Em **Ferramentas (Tools) > Core Debug Level**:
 ### 2. Softwares Recomendados
 O Node funciona com qualquer software compatível com o protocolo Art-Net I, II, III ou IV:
 * **QLC+**
+* **Lumikit**
 * **Resolume Arena**
 * **GrandMA2 / GrandMA3 (onPC)**
 * **Onyx (Obsidian)**
