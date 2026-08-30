@@ -106,8 +106,8 @@ O Node funciona com qualquer software compatível com o protocolo Art-Net I, II,
 Se perder o acesso ao IP ou configurar uma rede incorreta:
 1. Ligue a placa à energia.
 2. Assim que o LED piscar, desligue da tomada.
-3. Repita este processo **4 vezes consecutivas** (em menos de 4 segundos em cada tentativa).
-4. Na 4ª vez, deixe a placa ligada: a memória interna será apagada e o sistema voltará aos padrões de fábrica (DHCP ativo e rede `10.0.0.1` em fallback).
+3. Repita este processo **2 vezes consecutivas** (em menos de 4 segundos em cada tentativa).
+4. Na 2ª vez, deixe a placa ligada: a memória interna será apagada e o sistema voltará aos padrões de fábrica (DHCP ativo e rede `10.0.0.1` em fallback).
 
 ---
 
