@@ -3,7 +3,7 @@ A open-source project aiming to give access to all people a low budget and easy-
 
 # 🎭 Professional WT32-ETH01 Art-Net to DMX Node
 ![ESP32 Core](https://img.shields.io/badge/ESP32_Core-v2.0.17-red?style=for-the-badge&logo=espressif)
-![License](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-blue?style=for-the-badge)
+![License](https://img.shields.io/badge/License-GPLv3-blue?style=for-the-badge)
 
 Um Node Art-Net para DMX512 de alta performance e nível industrial, desenvolvido para a placa **WT32-ETH01 (ESP32 Ethernet)**. 
 
@@ -113,10 +113,7 @@ Se perder o acesso ao IP ou configurar uma rede incorreta:
 
 ## 📜 Licença
 
-Este projeto está licenciado sob a licença **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**.
-
-* **Gratuito** para uso pessoal, educacional e por entusiastas/hobbistas.
-* **Proibida a comercialização** ou venda de produtos/firmwares derivados sem autorização prévia do autor.
+Este projeto é um software livre distribuído sob os termos da GNU General Public License v3.0 (GPLv3).
 
 **Para mais informações consultar o ficheiro [LICENSE](LICENSE)**
 
