@@ -379,7 +379,11 @@ bool autorizado(const char *method, const char *path, const String &canonical) {
   String header = server.header(AUTH_HEADER);
   int colon = header.indexOf(':');
   if (colon <= 0) {
-    log_w("Auth: header ausente em %s %s", method, path);
+    log_w("Auth: header ausente em %s %s (%d headers)", method, path,
+          server.headers());
+    for (int i = 0; i < server.headers(); i++) {
+      log_w("  hdr: %s", server.headerName(i).c_str());
+    }
     return false;
   }
 

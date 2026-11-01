@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(dashboard::index))
         .route("/api/devices", get(list_devices))
+        .route("/api/version", get(version))
         .route("/api/devices/add", post(add_device))
         .route("/api/devices/:id/claim", post(claim_device))
         .route("/api/devices/:id/diagnostics", post(enable_diagnostics))
@@ -63,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", args.port)).await?;
     let url = format!("http://localhost:{}/", args.port);
-    println!("Easy ArtNet Hub: {url}");
+    println!("Easy ArtNet Hub v{}: {url}", env!("CARGO_PKG_VERSION"));
     if !args.no_open {
         let _ = open::that(&url);
     }
@@ -74,6 +75,10 @@ async fn main() -> anyhow::Result<()> {
 
 async fn list_devices(State(state): State<AppState>) -> Json<Vec<Device>> {
     Json(state.list().await)
+}
+
+async fn version() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "version": env!("CARGO_PKG_VERSION") }))
 }
 
 async fn scan(State(state): State<AppState>) -> StatusCode {

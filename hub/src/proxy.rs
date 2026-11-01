@@ -138,6 +138,14 @@ async fn send_signed(
     ))?;
     let auth_header =
         auth::sign_request(&credentials.key, method.as_str(), path, counter, canonical);
+    eprintln!(
+        "auth: {} {} {} ctr={} hdr={}",
+        device.id,
+        method.as_str(),
+        path,
+        counter,
+        auth_header
+    );
 
     let reqwest_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
         .map_err(|_| (StatusCode::BAD_REQUEST, "Método inválido".to_string()))?;
