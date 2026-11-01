@@ -1,0 +1,26 @@
+[package]
+name = "easy-artnet-hub"
+version = "0.1.0"
+edition = "2021"
+description = "Hub local para descobrir e configurar interfaces Easy ArtNet"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+anyhow = "1"
+axum = "0.7"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+futures = "0.3"
+if-addrs = "0.13"
+ipnet = "2"
+mdns-sd = "0.13"
+open = "5"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
+[profile.release]
+strip = true
+lto = "thin"

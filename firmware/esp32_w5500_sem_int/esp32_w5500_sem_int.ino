@@ -57,6 +57,7 @@
 #include <Preferences.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <lwip/sockets.h>
 #include "esp_eth.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -67,6 +68,15 @@ Preferences memoria;
 WebServer server(80);
 NetworkUDP artnetUdp;
 uint8_t artnetPacket[530];
+
+#define FW_VERSION "0.1.0"
+#define BEACON_PORT 6456
+#define BEACON_INTERVAL_MS 2000
+
+char mac_str[18];
+bool dispositivo_claimed = false;
+uint32_t last_beacon_ms = 0;
+int beacon_sock = -1;
 
 // Interface W5500 própria: flags de servidor DHCP para o handle existir; em
 // modo router o cliente DHCP é arrancado manualmente sobre a mesma interface.
@@ -148,7 +158,7 @@ String getPaginaWeb() {
           <a href="http://%MDNS%.local" style="color:#3498db;">http://%MDNS%.local</a><br>
           <a href="http://%IP_ATUAL%" style="color:#3498db;">http://%IP_ATUAL%</a>
         </p>
-        <form action="/salvar" method="POST">
+        <form action="salvar" method="POST">
           <label>Universo Art-Net:</label>
           <input type="number" name="univ" min="0" max="32767" value="%UNIV%">
 
@@ -222,6 +232,42 @@ void artnetRead() {
   uint16_t universe = artnetPacket[14] | (artnetPacket[15] << 8);
   uint16_t length = artnetPacket[17] | (artnetPacket[16] << 8);
   onArtNetFrame(universe, length, artnetPacket[12], artnetPacket + ART_DMX_START);
+}
+
+// Descoberta passiva para o hub: não depende de DNS/mDNS do sistema.
+void enviarBeacon() {
+  if (beacon_sock < 0 || ip_atual == "0.0.0.0" ||
+      millis() - last_beacon_ms < BEACON_INTERVAL_MS) {
+    return;
+  }
+  last_beacon_ms = millis();
+
+  char payload[192];
+  int n = snprintf(payload, sizeof(payload),
+                   "{\"id\":\"%s\",\"ip\":\"%s\",\"port\":80,\"fw\":\"%s\","
+                   "\"claimed\":%s,\"name\":\"%s\"}",
+                   mdns_nome, ip_atual.c_str(), FW_VERSION,
+                   dispositivo_claimed ? "true" : "false", mdns_nome);
+  if (n <= 0 || n >= (int)sizeof(payload)) {
+    return;
+  }
+
+  struct sockaddr_in dest = {};
+  dest.sin_family = AF_INET;
+  dest.sin_port = htons(BEACON_PORT);
+  dest.sin_addr.s_addr = 0xFFFFFFFF;  // 255.255.255.255
+  sendto(beacon_sock, payload, n, 0, (struct sockaddr *)&dest, sizeof(dest));
+}
+
+void iniciarBeacon() {
+  beacon_sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (beacon_sock < 0) {
+    log_e("Falha ao criar socket do beacon");
+    return;
+  }
+  int yes = 1;
+  setsockopt(beacon_sock, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
+  log_i("Beacon UDP %d ativo", BEACON_PORT);
 }
 
 void onEthEvent(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -390,9 +436,12 @@ void setup() {
   // igual em todos os ESP32) para não colidir com "dmx.local" nem com outros nós.
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_ETH);
+  mac[0] |= 0x02;  // mesmo MAC local derivado usado no W5500
+  snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
   snprintf(mdns_nome, sizeof(mdns_nome), "dmx-%02x%02x%02x",
            (unsigned)mac[3], (unsigned)mac[4], (unsigned)mac[5]);
-  log_i("Nome mDNS: %s.local", mdns_nome);
+  log_i("Nome mDNS: %s.local  MAC: %s", mdns_nome, mac_str);
 
   memoria.begin("config", false);
 
@@ -469,6 +518,9 @@ void setup() {
   }
 
   if (MDNS.begin(mdns_nome)) {
+    MDNS.addService("easyartnet", "tcp", 80);
+    MDNS.addServiceTxt((const char *)"easyartnet", (const char *)"tcp", (const char *)"id", (const char *)mdns_nome);
+    MDNS.addServiceTxt((const char *)"easyartnet", (const char *)"tcp", (const char *)"fw", (const char *)FW_VERSION);
     log_i("mDNS Iniciado! Aceda através de http://%s.local", mdns_nome);
   } else {
     log_e("Falha ao iniciar mDNS; use o IP %s", ip_atual.c_str());
@@ -479,7 +531,23 @@ void setup() {
   }
 
   artnetBegin();
+  iniciarBeacon();
   log_i("Artnet configurado (NetworkUDP/lwIP, sem Wi-Fi)");
+
+  server.on("/api/info", []() {
+    String json = "{\"id\":\"";
+    json += mdns_nome;
+    json += "\",\"mac\":\"";
+    json += mac_str;
+    json += "\",\"ip\":\"";
+    json += ip_atual;
+    json += "\",\"port\":80,\"fw\":\"" FW_VERSION "\",\"claimed\":";
+    json += dispositivo_claimed ? "true" : "false";
+    json += ",\"name\":\"";
+    json += mdns_nome;
+    json += "\"}";
+    server.send(200, "application/json", json);
+  });
 
   server.on("/", []() {
     server.send(200, "text/html", getPaginaWeb());
@@ -502,6 +570,7 @@ void setup() {
 }
 
 void loop() { 
+  enviarBeacon();
   artnetRead();
   server.handleClient();
 

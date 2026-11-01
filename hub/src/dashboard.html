@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Easy ArtNet Hub</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+    main { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+    header { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin-bottom:28px; flex-wrap:wrap; }
+    h1 { margin:0; font-size:30px; letter-spacing:-0.03em; }
+    .sub { color:var(--muted); margin-top:6px; font-size:14px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    button, input[type=text] { font:inherit; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); padding:9px 12px; }
+    button { cursor:pointer; }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#082f49; font-weight:650; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .add { display:flex; gap:8px; margin:18px 0 28px; flex-wrap:wrap; }
+    .add input { flex:1; min-width:220px; }
+    .grid { display:grid; gap:14px; }
+    .device { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; }
+    .device-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .name { font-size:17px; font-weight:650; }
+    .id { color:var(--muted); font-size:12px; margin-top:3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .pill { font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); white-space:nowrap; }
+    .pill.online { color:var(--ok); border-color:#14532d; }
+    .pill.offline { color:var(--warn); border-color:#78350f; }
+    .meta { display:flex; gap:18px; flex-wrap:wrap; color:var(--muted); font-size:13px; margin-top:14px; }
+    .meta b { color:var(--text); font-weight:600; }
+    .foot { display:flex; justify-content:space-between; align-items:center; margin-top:16px; gap:12px; }
+    .open { color:var(--accent); text-decoration:none; font-weight:600; }
+    .empty { border:1px dashed var(--line); border-radius:14px; padding:34px; color:var(--muted); text-align:center; }
+    .error { color:#fca5a5; margin-top:10px; font-size:13px; }
+    .note { color:var(--muted); font-size:12px; margin-top:24px; line-height:1.5; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Easy ArtNet Hub</h1>
+      <div class="sub">Interface local. O browser fala com <b>localhost</b>; o hub descobre a placa na rede de iluminação.</div>
+    </div>
+    <div class="actions">
+      <button id="scan" class="primary">Procurar interfaces</button>
+    </div>
+  </header>
+
+  <form class="add" id="add-form">
+    <input type="text" id="address" placeholder="IP manual, ex.: 192.168.1.42 ou 10.0.0.1">
+    <button type="submit">Adicionar por IP</button>
+  </form>
+  <div class="error" id="error"></div>
+
+  <section class="grid" id="devices"></section>
+
+  <p class="note">
+    Suportado: mesma rede de iluminação, sem client isolation. O hub tenta mDNS service,
+    beacon UDP 6456 e scan da sub-rede; o IP manual é o último recurso. Guest Wi-Fi,
+    client isolation e VLAN sem routing não são suportados.
+  </p>
+</main>
+
+<script>
+const devicesEl = document.getElementById('devices');
+const errorEl = document.getElementById('error');
+const scanButton = document.getElementById('scan');
+const addForm = document.getElementById('add-form');
+const addressInput = document.getElementById('address');
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function ago(seconds) {
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - Number(seconds || 0));
+  if (diff < 5) return 'agora';
+  if (diff < 60) return `há ${diff}s`;
+  if (diff < 3600) return `há ${Math.floor(diff / 60)}m`;
+  return `há ${Math.floor(diff / 3600)}h`;
+}
+
+function render(devices) {
+  if (!devices.length) {
+    devicesEl.innerHTML = '<div class="empty">Nenhuma interface encontrada.<br>Liga o PC à rede de iluminação; o hub tenta mDNS, beacon e scan.</div>';
+    return;
+  }
+  devicesEl.innerHTML = devices.map(d => {
+    const online = (Date.now() / 1000 - Number(d.last_seen || 0)) < 15;
+    const id = encodeURIComponent(d.id);
+    return `
+      <article class="device">
+        <div class="device-head">
+          <div>
+            <div class="name">${esc(d.name || d.id)}</div>
+            <div class="id">${esc(d.id)}</div>
+          </div>
+          <span class="pill ${online ? 'online' : 'offline'}">${online ? 'online' : 'visto ' + ago(d.last_seen)}</span>
+        </div>
+        <div class="meta">
+          <span><b>IP</b> ${esc(d.ip)}:${esc(d.port)}</span>
+          <span><b>FW</b> ${esc(d.fw || '—')}</span>
+          <span><b>Claim</b> ${d.claimed ? 'sim' : 'não'}</span>
+          <span><b>Visto por</b> ${esc((d.sources || []).join(', '))}</span>
+        </div>
+        <div class="foot">
+          <span class="id">${esc(d.mac || 'MAC desconhecido')}</span>
+          <a class="open" href="/d/${id}/" target="_blank" rel="noopener">Abrir painel →</a>
+        </div>
+      </article>`;
+  }).join('');
+}
+
+async function refresh() {
+  try {
+    const response = await fetch('/api/devices', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    render(await response.json());
+  } catch (error) {
+    errorEl.textContent = `Não consegui ler os dispositivos: ${error}`;
+  }
+}
+
+scanButton.addEventListener('click', async () => {
+  scanButton.disabled = true;
+  scanButton.textContent = 'A procurar…';
+  errorEl.textContent = '';
+  try {
+    const response = await fetch('/api/scan', { method: 'POST' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    setTimeout(refresh, 1200);
+  } catch (error) {
+    errorEl.textContent = `Scan falhou: ${error}`;
+  } finally {
+    setTimeout(() => { scanButton.disabled = false; scanButton.textContent = 'Procurar interfaces'; }, 2500);
+  }
+});
+
+addForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const address = addressInput.value.trim();
+  if (!address) return;
+  errorEl.textContent = '';
+  try {
+    const response = await fetch('/api/devices/add', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ address }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+    addressInput.value = '';
+    await refresh();
+  } catch (error) {
+    errorEl.textContent = `Não adicionei: ${error}`;
+  }
+});
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>
