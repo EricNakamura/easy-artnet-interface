@@ -48,6 +48,8 @@ async fn proxy(
         "Dispositivo não encontrado".to_string(),
     ))?;
 
+    eprintln!("proxy: {} {} {}", device.id, method.as_str(), path);
+
     // O contador HMAC tem de chegar à placa por ordem; sem isto, dois pedidos
     // concorrentes (painel + favicon) podem originar 401 e re-claim em corrida.
     let _guard = state.request_lock.lock().await;
