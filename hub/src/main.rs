@@ -116,10 +116,12 @@ async fn claim_device(
     axum::extract::Path(id): axum::extract::Path<String>,
     Json(request): Json<ClaimRequest>,
 ) -> Result<Json<Device>, (StatusCode, String)> {
-    claim::claim_device(&state, &id, &request.code)
+    let _guard = state.request_lock.lock().await;
+    let device = claim::claim_device(&state, &id, &request.code)
         .await
-        .map(Json)
-        .map_err(|error| (StatusCode::BAD_REQUEST, error))
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))?;
+    println!("claim OK: {} ({})", device.id, device.ip);
+    Ok(Json(device))
 }
 
 async fn enable_diagnostics(

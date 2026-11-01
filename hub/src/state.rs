@@ -20,6 +20,7 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub scanning: Arc<AtomicBool>,
     pub auth: AuthStore,
+    pub request_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -35,6 +36,7 @@ impl AppState {
             http,
             scanning: Arc::new(AtomicBool::new(false)),
             auth: AuthStore::new(),
+            request_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 

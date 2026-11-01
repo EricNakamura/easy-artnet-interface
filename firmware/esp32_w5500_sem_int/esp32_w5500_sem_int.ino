@@ -371,17 +371,28 @@ bool autorizado(const char *method, const char *path, const String &canonical) {
       (int32_t)(millis() - diagnostico_ok_ate) < 0) {
     return true;
   }
-  if (!dispositivo_claimed) return false;
+  if (!dispositivo_claimed) {
+    log_w("Auth: placa ainda nao reivindicada");
+    return false;
+  }
 
   String header = server.header(AUTH_HEADER);
   int colon = header.indexOf(':');
-  if (colon <= 0) return false;
+  if (colon <= 0) {
+    log_w("Auth: header ausente em %s %s", method, path);
+    return false;
+  }
 
   uint64_t counter = strtoull(header.substring(0, colon).c_str(), nullptr, 10);
-  if (counter <= auth_counter) return false;
+  if (counter <= auth_counter) {
+    log_w("Auth: counter %llu <= %llu", (unsigned long long)counter,
+          (unsigned long long)auth_counter);
+    return false;
+  }
 
   uint8_t tag[32];
   if (!hexDecode(header.substring(colon + 1), tag, sizeof(tag))) {
+    log_w("Auth: tag hex invalido");
     return false;
   }
 
@@ -398,15 +409,26 @@ bool autorizado(const char *method, const char *path, const String &canonical) {
   uint8_t expected[32];
   hmacSha256(session_key, sizeof(session_key), (const uint8_t *)data.c_str(),
              data.length(), expected);
-  if (!constTimeEq(tag, expected, sizeof(tag))) return false;
+  if (!constTimeEq(tag, expected, sizeof(tag))) {
+    log_w("Auth: HMAC invalido em %s %s counter=%llu", method, path,
+          (unsigned long long)counter);
+    return false;
+  }
 
   auth_counter = counter;
   authPrefs.putULong64("ctr", counter);
+  log_i("Auth OK counter=%llu", (unsigned long long)counter);
   return true;
 }
 
 void negar() {
-  server.send(401, "text/plain", "Nao autorizado. Reivindica a placa no hub.");
+  String html = "<!doctype html><meta charset=utf-8><title>401</title>";
+  html += "<h1>401 - painel direto bloqueado</h1>";
+  html += "<p>Usa o hub: <code>http://localhost:8080/d/";
+  html += mdns_nome;
+  html += "/</code></p>";
+  html += "<p>Para diagnostico: ativa no hub e abre <code>/diagnostico</code>.</p>";
+  server.send(401, "text/html", html);
 }
 
 void handleClaim() {

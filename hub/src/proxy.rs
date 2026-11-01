@@ -48,9 +48,13 @@ async fn proxy(
         "Dispositivo não encontrado".to_string(),
     ))?;
 
+    // O contador HMAC tem de chegar à placa por ordem; sem isto, dois pedidos
+    // concorrentes (painel + favicon) podem originar 401 e re-claim em corrida.
+    let _guard = state.request_lock.lock().await;
+
     let credentials = state.auth.load(&device.id).ok_or((
         StatusCode::UNAUTHORIZED,
-        "Dispositivo não reivindicado; introduz o claim code no hub.".to_string(),
+        "Dispositivo não reivindicado neste hub; usa Reconectar.".to_string(),
     ))?;
 
     let mut url = format!(
@@ -85,6 +89,7 @@ async fn proxy(
     .await?;
 
     let response = if response.status() == StatusCode::UNAUTHORIZED {
+        eprintln!("proxy: {} devolveu 401; a refazer claim", device.id);
         let code = credentials.code.clone();
         claim::claim_device(&state, &device.id, &code)
             .await
@@ -167,6 +172,9 @@ pub async fn enable_diagnostics(
         StatusCode::NOT_FOUND,
         "Dispositivo não encontrado".to_string(),
     ))?;
+
+    let _guard = state.request_lock.lock().await;
+
     let credentials = state.auth.load(&device.id).ok_or((
         StatusCode::UNAUTHORIZED,
         "Dispositivo não reivindicado.".to_string(),
