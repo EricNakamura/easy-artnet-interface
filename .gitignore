@@ -1,0 +1,36 @@
+# Build / firmware artifacts
+.pio/
+build/
+*.bin
+*.elf
+*.map
+*.hex
+
+# Local recovery images and prototype dumps
+recovery/
+prototype_dump/
+
+# Logs and backups
+*.log
+*.FCBak
+*.FCStd1
+*.bak
+*~
+
+# OS / editor
+.DS_Store
+._*
+.vscode/
+.idea/
+*.swp
+**/.history/
+
+# KiCad generated / local files
+hardware/kicad/*.kicad_prl
+hardware/kicad/temp-freerouting.dsn
+hardware/kicad/gerber/
+hardware/kicad/fp-info-cache
+hardware/kicad/_autosave-*
+
+# CAD exports
+*.stl

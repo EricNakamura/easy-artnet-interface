@@ -9,6 +9,17 @@ Um Node Art-Net para DMX512 de alta performance e nível industrial, desenvolvid
 
 Este projeto resolve os problemas clássicos de rede em eventos ao vivo: não perde a ligação à internet no seu computador (Mac/Windows), possui **DHCP Inteligente com Auto-Router**, suporte **mDNS**, **proteção contra apagão DMX (40Hz constante)** e **Reset de Fábrica sem botões**.
 
+## 📁 Estrutura do Repositório
+
+| Pasta | Conteúdo |
+| :--- | :--- |
+| `firmware/` | Sketches por variante de hardware (WT32-ETH01 e ESP32 + W5500) |
+| `src/` | Entradas do PlatformIO; não editar |
+| `hardware/kicad/` | Esquema e PCB KiCad |
+| `hardware/cad/` | Modelos FreeCAD da caixa |
+| `scripts/` | Upload e recuperação por USB |
+| `docs/` | [Diagnóstico](docs/diagnostics.md), [recuperação](docs/recovery.md) e [protótipo](docs/prototype.md) |
+
 ---
 
 ## 🚀 Principais Características
@@ -18,7 +29,7 @@ Este projeto resolve os problemas clássicos de rede em eventos ao vivo: não pe
   * Se ligado a um Router/Switch: obtém IP automaticamente via DHCP.
   * Se ligado direto ao PC/Mac (sem router): **a placa transforma-se num Servidor DHCP automático** (Gama `10.0.0.x`), permitindo ligação imediata *Plug & Play*.
 * **Sem Conflito de Internet:** O servidor DHCP interno da placa desativa o envio de Gateway/DNS, permitindo que o Mac/PC continue a usar o Wi-Fi para aceder à internet (WhatsApp, navegação, etc.) enquanto controla a iluminação por cabo.
-* **Acesso por Nome (mDNS):** Aceda ao painel via `http://dmx.local` no navegador sem precisar de saber o IP.
+* **Acesso por Nome (mDNS):** Aceda ao painel via `http://dmx-xxxxxx.local` (o sufixo único aparece no serial e no próprio painel; também pode usar o IP mostrado no painel).
 * **Painel Web de Configuração:** Interface responsiva para alterar Universo Art-Net, alternar entre DHCP e IP Fixo.
 * **Proteção DMX Contínua (40 FPS / 25ms):** Se a rede falhar ou o software de luz fechar, o ESP32 continua a enviar a última cena DMX aos aparelhos, evitando apagões ou piscadelas no palco.
 * **Smart Factory Reset:** Reset de fábrica por ciclo de energia (ligar/desligar a placa 2 vezes seguidas rapidamente), eliminando a necessidade de botões físicos.
@@ -59,6 +70,22 @@ Este projeto resolve os problemas clássicos de rede em eventos ao vivo: não pe
 
 ## 💻 Como Compilar e Enviar o Código
 
+### PlatformIO (recomendado)
+
+O `platformio.ini` já define um ambiente por variante:
+
+| Ambiente | Hardware | Core ESP32 |
+| :--- | :--- | :--- |
+| `w5500_sem_int` | ESP32 + W5500 (sem fio INT) | 3.x |
+| `w5500_com_int` | ESP32 + W5500 (INT no GPIO27) | 2.0.17 |
+| `wt32_eth01` | WT32-ETH01 (LAN8720) | 2.0.17 |
+| `w5500_diag` | Diagnóstico do W5500 | 3.x |
+
+```bash
+pio run -e w5500_sem_int -t upload
+pio device monitor
+```
+
 ### Requisitos (Arduino IDE)
 
 > [!IMPORTANT]
@@ -84,7 +111,7 @@ Em **Ferramentas (Tools) > Core Debug Level**:
 
 ### 1. Primeiro Arranque (Plug & Play)
 1. Ligue o cabo Ethernet entre a placa e o seu computador (ou Switch).
-2. Abra o navegador web e aceda a: **`http://dmx.local`**
+2. Abra o navegador web e aceda ao endereço mostrado no serial/painel: **`http://dmx-xxxxxx.local`** (sufixo único do chip), ou use o IP indicado.
 3. Configure o Universo Art-Net pretendido (Padrão: `0`).
 
 ### 2. Softwares Recomendados
