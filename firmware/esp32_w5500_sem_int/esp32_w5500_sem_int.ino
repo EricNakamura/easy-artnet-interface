@@ -58,6 +58,10 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <lwip/sockets.h>
+#include <mbedtls/md.h>
+#include <esp_random.h>
+#include <algorithm>
+#include <vector>
 #include "esp_eth.h"
 #include "esp_mac.h"
 #include "esp_netif.h"
@@ -77,6 +81,16 @@ char mac_str[18];
 bool dispositivo_claimed = false;
 uint32_t last_beacon_ms = 0;
 int beacon_sock = -1;
+
+Preferences factoryPrefs;
+Preferences authPrefs;
+String claim_code;
+uint8_t session_key[32];
+uint64_t auth_counter = 0;
+uint32_t diagnostico_janela_ate = 0;
+uint32_t diagnostico_ok_ate = 0;
+uint8_t claim_fails = 0;
+uint32_t claim_block_until = 0;
 
 // Interface W5500 própria: flags de servidor DHCP para o handle existir; em
 // modo router o cliente DHCP é arrancado manualmente sobre a mesma interface.
@@ -198,6 +212,293 @@ String getPaginaWeb() {
   html.replace("%MASK%", mask_str);
   
   return html;
+}
+
+// --- Claim code + autenticação do painel ---
+// O claim code é de fábrica (NVS "factory", sobrevive ao reset de config) e
+// nunca é enviado. O hub prova posse com HMAC e envia uma chave de sessão
+// cifrada por stream HMAC; os pedidos seguintes levam HMAC + contador.
+static const char AUTH_HEADER[] = "X-EasyArtNet-Auth";
+static const char BASE32[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+String normalizarCodigo(String code) {
+  code.trim();
+  code.toUpperCase();
+  code.replace("-", "");
+  code.replace(" ", "");
+  code.replace(":", "");
+  return code;
+}
+
+String gerarClaimCode() {
+  uint8_t raw[10];
+  for (int i = 0; i < (int)sizeof(raw); i++) {
+    raw[i] = (uint8_t)esp_random();
+  }
+
+  String out;
+  uint32_t buffer = 0;
+  int bits = 0;
+  for (int i = 0; i < (int)sizeof(raw); i++) {
+    buffer = (buffer << 8) | raw[i];
+    bits += 8;
+    while (bits >= 5) {
+      out += BASE32[(buffer >> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  return out;
+}
+
+void hmacSha256(const uint8_t *key, size_t key_len, const uint8_t *data,
+                size_t data_len, uint8_t out[32]) {
+  const mbedtls_md_info_t *info =
+      mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  mbedtls_md_hmac(info, key, key_len, data, data_len, out);
+}
+
+void derivarChaveClaim(const char *code, uint8_t out[32]) {
+  static const char prefix[] = "easyartnet-claim";
+  hmacSha256((const uint8_t *)code, strlen(code),
+             (const uint8_t *)prefix, strlen(prefix), out);
+}
+
+int hexVal(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  return -1;
+}
+
+bool hexDecode(const String &in, uint8_t *out, size_t out_len) {
+  if (in.length() != out_len * 2) return false;
+  for (size_t i = 0; i < out_len; i++) {
+    int hi = hexVal(in[i * 2]);
+    int lo = hexVal(in[i * 2 + 1]);
+    if (hi < 0 || lo < 0) return false;
+    out[i] = (uint8_t)((hi << 4) | lo);
+  }
+  return true;
+}
+
+String hexEncode(const uint8_t *data, size_t len) {
+  static const char HEX_CHARS[] = "0123456789abcdef";
+  String out;
+  out.reserve(len * 2);
+  for (size_t i = 0; i < len; i++) {
+    out += HEX_CHARS[data[i] >> 4];
+    out += HEX_CHARS[data[i] & 0x0f];
+  }
+  return out;
+}
+
+bool jsonString(const String &json, const char *key, String &out) {
+  String needle = String("\"") + key + "\"";
+  int key_pos = json.indexOf(needle);
+  if (key_pos < 0) return false;
+  int colon = json.indexOf(':', key_pos + needle.length());
+  if (colon < 0) return false;
+  int start = json.indexOf('"', colon + 1);
+  if (start < 0) return false;
+  int end = json.indexOf('"', start + 1);
+  if (end < 0) return false;
+  out = json.substring(start + 1, end);
+  return true;
+}
+
+bool constTimeEq(const uint8_t *a, const uint8_t *b, size_t len) {
+  uint8_t diff = 0;
+  for (size_t i = 0; i < len; i++) diff |= a[i] ^ b[i];
+  return diff == 0;
+}
+
+void carregarAuth() {
+  factoryPrefs.begin("factory", false);
+  claim_code = normalizarCodigo(factoryPrefs.getString("claim", ""));
+  if (claim_code.length() != 16) {
+    claim_code = gerarClaimCode();
+    factoryPrefs.putString("claim", claim_code);
+  }
+  log_i("Claim code: %s", claim_code.c_str());
+
+  authPrefs.begin("auth", false);
+  bool claimed = authPrefs.getBool("claimed", false);
+  uint8_t key[32];
+  size_t key_len = authPrefs.getBytes("key", key, sizeof(key));
+  dispositivo_claimed = claimed && key_len == sizeof(key);
+  if (dispositivo_claimed) {
+    memcpy(session_key, key, sizeof(session_key));
+  }
+  auth_counter = authPrefs.getULong64("ctr", 0);
+}
+
+void salvarSessao(const uint8_t key[32]) {
+  memcpy(session_key, key, sizeof(session_key));
+  authPrefs.putBytes("key", key, sizeof(session_key));
+  authPrefs.putBool("claimed", true);
+  authPrefs.putULong64("ctr", 0);
+  auth_counter = 0;
+  dispositivo_claimed = true;
+}
+
+void limparAuth() {
+  Preferences auth;
+  auth.begin("auth", false);
+  auth.clear();
+  auth.end();
+}
+
+String corpoCanonico() {
+  std::vector<std::pair<String, String>> args;
+  args.reserve(server.args());
+  for (int i = 0; i < server.args(); i++) {
+    args.push_back({server.argName(i), server.arg(i)});
+  }
+  std::sort(args.begin(), args.end());
+
+  String out;
+  for (const auto &arg : args) {
+    if (out.length()) out += '&';
+    out += arg.first;
+    out += '=';
+    out += arg.second;
+  }
+  return out;
+}
+
+bool autorizado(const char *method, const char *path, const String &canonical) {
+  if (diagnostico_ok_ate > 0 &&
+      (int32_t)(millis() - diagnostico_ok_ate) < 0) {
+    return true;
+  }
+  if (!dispositivo_claimed) return false;
+
+  String header = server.header(AUTH_HEADER);
+  int colon = header.indexOf(':');
+  if (colon <= 0) return false;
+
+  uint64_t counter = strtoull(header.substring(0, colon).c_str(), nullptr, 10);
+  if (counter <= auth_counter) return false;
+
+  uint8_t tag[32];
+  if (!hexDecode(header.substring(colon + 1), tag, sizeof(tag))) {
+    return false;
+  }
+
+  char ctr[24];
+  snprintf(ctr, sizeof(ctr), "%llu", (unsigned long long)counter);
+  String data = String(method);
+  data += '\n';
+  data += path;
+  data += '\n';
+  data += ctr;
+  data += '\n';
+  data += canonical;
+
+  uint8_t expected[32];
+  hmacSha256(session_key, sizeof(session_key), (const uint8_t *)data.c_str(),
+             data.length(), expected);
+  if (!constTimeEq(tag, expected, sizeof(tag))) return false;
+
+  auth_counter = counter;
+  authPrefs.putULong64("ctr", counter);
+  return true;
+}
+
+void negar() {
+  server.send(401, "text/plain", "Nao autorizado. Reivindica a placa no hub.");
+}
+
+void handleClaim() {
+  if (claim_block_until > 0 &&
+      (int32_t)(millis() - claim_block_until) < 0) {
+    server.send(429, "text/plain", "Muitas tentativas. Tenta mais tarde.");
+    return;
+  }
+
+  String nonce_hex, cipher_hex, tag_hex;
+  String body = server.arg("plain");
+  if (!jsonString(body, "nonce", nonce_hex) ||
+      !jsonString(body, "cipher", cipher_hex) ||
+      !jsonString(body, "tag", tag_hex)) {
+    server.send(400, "text/plain", "Pedido de claim inválido.");
+    return;
+  }
+
+  uint8_t nonce[16], cipher[32], tag[32];
+  if (!hexDecode(nonce_hex, nonce, sizeof(nonce)) ||
+      !hexDecode(cipher_hex, cipher, sizeof(cipher)) ||
+      !hexDecode(tag_hex, tag, sizeof(tag))) {
+    server.send(400, "text/plain", "Claim inválido.");
+    return;
+  }
+
+  uint8_t key[32], stream[32], expected[32], session[32];
+  derivarChaveClaim(claim_code.c_str(), key);
+
+  uint8_t kd[9 + 16];
+  memcpy(kd, "keystream", 9);
+  memcpy(kd + 9, nonce, sizeof(nonce));
+  hmacSha256(key, sizeof(key), kd, sizeof(kd), stream);
+  for (size_t i = 0; i < sizeof(session); i++) {
+    session[i] = cipher[i] ^ stream[i];
+  }
+
+  uint8_t td[3 + 16 + 32];
+  memcpy(td, "tag", 3);
+  memcpy(td + 3, nonce, sizeof(nonce));
+  memcpy(td + 3 + sizeof(nonce), cipher, sizeof(cipher));
+  hmacSha256(key, sizeof(key), td, sizeof(td), expected);
+  if (!constTimeEq(tag, expected, sizeof(tag))) {
+    claim_fails++;
+    if (claim_fails >= 5) {
+      claim_block_until = millis() + 60000;
+      claim_fails = 0;
+    }
+    server.send(401, "text/plain", "Claim code inválido.");
+    return;
+  }
+
+  salvarSessao(session);
+  claim_fails = 0;
+  server.send(200, "application/json", "{\"ok\":true}");
+  log_i("Claim OK");
+}
+
+void handleDiagEnable() {
+  if (!autorizado("POST", "/api/diagnostics/enable", "")) {
+    negar();
+    return;
+  }
+  diagnostico_janela_ate = millis() + 600000;
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void handleDiagGet() {
+  bool janela = diagnostico_janela_ate > 0 &&
+                (int32_t)(millis() - diagnostico_janela_ate) < 0;
+  String html = "<!doctype html><meta charset=utf-8><title>Diagnostico</title>";
+  html += janela ? "<p>Introduz o claim code para ativar 10 min de painel direto.</p>"
+                 : "<p>Janela fechada. Ativa o diagnostico no hub.</p>";
+  html += "<form method=post action=/diagnostico><input name=code autofocus>";
+  html += "<button>Entrar</button></form>";
+  server.send(200, "text/html", html);
+}
+
+void handleDiagPost() {
+  bool janela = diagnostico_janela_ate > 0 &&
+                (int32_t)(millis() - diagnostico_janela_ate) < 0;
+  String code = normalizarCodigo(server.arg("code"));
+  bool ok = janela && code.length() == claim_code.length() &&
+            constTimeEq((const uint8_t *)code.c_str(),
+                        (const uint8_t *)claim_code.c_str(), code.length());
+  if (!ok) {
+    server.send(401, "text/plain", "Diagnostico negado.");
+    return;
+  }
+  diagnostico_ok_ate = millis() + 600000;
+  server.send(200, "text/html",
+              "<p>Diagnostico ativo 10 min. <a href=/>Abrir painel</a></p>");
 }
 
 void onArtNetFrame(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t* data) {
@@ -452,6 +753,7 @@ void setup() {
   if (contagem_boots >= 2) {
     log_w("\n[AVISO] 2 arranques rápidos detetados. FACTORY RESET...");
     memoria.clear();
+    limparAuth();
     delay(1000);
     ESP.restart();
   }
@@ -461,6 +763,8 @@ void setup() {
   gw_str = memoria.getString("gw", "0.0.0.0");
   mask_str = memoria.getString("mask", "255.0.0.0");
   startUniverse = memoria.getInt("univ", 0);
+
+  carregarAuth();
 
   modo_rede = usar_dhcp ? MODO_DHCP_CLIENTE : MODO_IP_FIXO;
 
@@ -550,10 +854,24 @@ void setup() {
   });
 
   server.on("/", []() {
+    if (!autorizado("GET", "/", "")) {
+      negar();
+      return;
+    }
     server.send(200, "text/html", getPaginaWeb());
   });
 
+  server.on("/api/claim", HTTP_POST, handleClaim);
+  server.on("/api/diagnostics/enable", HTTP_POST, handleDiagEnable);
+  server.on("/diagnostico", HTTP_GET, handleDiagGet);
+  server.on("/diagnostico", HTTP_POST, handleDiagPost);
+
   server.on("/salvar", HTTP_POST, []() {
+    String canonical = corpoCanonico();
+    if (!autorizado("POST", "/salvar", canonical)) {
+      negar();
+      return;
+    }
     bool novo_dhcp = server.hasArg("dhcp");
     memoria.putBool("dhcp", novo_dhcp);
     memoria.putString("ip", server.arg("ip"));

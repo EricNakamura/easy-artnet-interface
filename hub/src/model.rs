@@ -49,3 +49,8 @@ pub struct Beacon {
 pub struct AddDevice {
     pub address: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ClaimRequest {
+    pub code: String,
+}

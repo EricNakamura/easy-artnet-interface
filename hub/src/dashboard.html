@@ -31,6 +31,7 @@
     .meta b { color:var(--text); font-weight:600; }
     .foot { display:flex; justify-content:space-between; align-items:center; margin-top:16px; gap:12px; }
     .open { color:var(--accent); text-decoration:none; font-weight:600; }
+    button.claim { border-color:var(--accent); color:var(--accent); background:transparent; font-weight:650; }
     .empty { border:1px dashed var(--line); border-radius:14px; padding:34px; color:var(--muted); text-align:center; }
     .error { color:#fca5a5; margin-top:10px; font-size:13px; }
     .note { color:var(--muted); font-size:12px; margin-top:24px; line-height:1.5; }
@@ -53,6 +54,7 @@
     <button type="submit">Adicionar por IP</button>
   </form>
   <div class="error" id="error"></div>
+  <div class="error" id="notice" style="color:#86efac"></div>
 
   <section class="grid" id="devices"></section>
 
@@ -66,6 +68,7 @@
 <script>
 const devicesEl = document.getElementById('devices');
 const errorEl = document.getElementById('error');
+const noticeEl = document.getElementById('notice');
 const scanButton = document.getElementById('scan');
 const addForm = document.getElementById('add-form');
 const addressInput = document.getElementById('address');
@@ -107,7 +110,13 @@ function render(devices) {
         </div>
         <div class="foot">
           <span class="id">${esc(d.mac || 'MAC desconhecido')}</span>
-          <a class="open" href="/d/${id}/" target="_blank" rel="noopener">Abrir painel →</a>
+          <span>
+            ${d.claimed
+              ? `<a class="open" href="/d/${id}/" target="_blank" rel="noopener">Abrir painel →</a>
+                 <button class="claim" data-claim="${esc(d.id)}">Reconectar</button>
+                 <button class="claim" data-diagnostics="${esc(d.id)}">Diagnóstico</button>`
+              : `<button class="claim" data-claim="${esc(d.id)}">Reivindicar</button>`}
+          </span>
         </div>
       </article>`;
   }).join('');
@@ -157,6 +166,58 @@ addForm.addEventListener('submit', async (event) => {
     await refresh();
   } catch (error) {
     errorEl.textContent = `Não adicionei: ${error}`;
+  }
+});
+
+devicesEl.addEventListener('click', async (event) => {
+  const claimButton = event.target.closest('button[data-claim]');
+  const diagnosticsButton = event.target.closest('button[data-diagnostics]');
+  if (!claimButton && !diagnosticsButton) return;
+
+  errorEl.textContent = '';
+  noticeEl.textContent = '';
+
+  if (claimButton) {
+    const id = claimButton.getAttribute('data-claim');
+    const code = prompt('Claim code da etiqueta da interface:');
+    if (!code) return;
+    claimButton.disabled = true;
+    try {
+      const response = await fetch(`/api/devices/${encodeURIComponent(id)}/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `HTTP ${response.status}`);
+      }
+      await refresh();
+    } catch (error) {
+      errorEl.textContent = `Claim falhou: ${error}`;
+    } finally {
+      claimButton.disabled = false;
+    }
+    return;
+  }
+
+  const id = diagnosticsButton.getAttribute('data-diagnostics');
+  diagnosticsButton.disabled = true;
+  try {
+    const response = await fetch(`/api/devices/${encodeURIComponent(id)}/diagnostics`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const url = esc(data.url || '');
+    noticeEl.innerHTML = `Diagnóstico ativo 10 min: <a class="open" href="${url}" target="_blank" rel="noopener">abrir login</a> (usa o claim code).`;
+  } catch (error) {
+    errorEl.textContent = `Diagnóstico falhou: ${error}`;
+  } finally {
+    diagnosticsButton.disabled = false;
   }
 });
 

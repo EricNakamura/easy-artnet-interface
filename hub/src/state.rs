@@ -10,7 +10,7 @@ use std::{
 use reqwest::redirect::Policy;
 use tokio::sync::RwLock;
 
-use crate::model::Device;
+use crate::{model::Device, vault::AuthStore};
 
 pub type Registry = Arc<RwLock<HashMap<String, Device>>>;
 
@@ -19,6 +19,7 @@ pub struct AppState {
     pub devices: Registry,
     pub http: reqwest::Client,
     pub scanning: Arc<AtomicBool>,
+    pub auth: AuthStore,
 }
 
 impl AppState {
@@ -33,6 +34,7 @@ impl AppState {
             devices: Arc::new(RwLock::new(HashMap::new())),
             http,
             scanning: Arc::new(AtomicBool::new(false)),
+            auth: AuthStore::new(),
         }
     }
 
@@ -61,7 +63,9 @@ impl AppState {
         if device.fw.is_some() {
             entry.fw = device.fw;
         }
-        entry.claimed |= device.claimed;
+        if device.sources.iter().any(|source| source != "mdns") {
+            entry.claimed = device.claimed;
+        }
         entry.last_seen = device.last_seen.max(entry.last_seen);
         for source in device.sources {
             if !entry.sources.contains(&source) {

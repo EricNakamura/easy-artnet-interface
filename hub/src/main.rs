@@ -1,8 +1,11 @@
+mod auth;
+mod claim;
 mod dashboard;
 mod discovery;
 mod model;
 mod proxy;
 mod state;
+mod vault;
 
 use std::time::Duration;
 
@@ -15,7 +18,7 @@ use axum::{
 };
 use clap::Parser;
 
-use model::{AddDevice, Device};
+use model::{AddDevice, ClaimRequest, Device};
 use state::AppState;
 
 #[derive(Debug, Parser)]
@@ -50,6 +53,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(dashboard::index))
         .route("/api/devices", get(list_devices))
         .route("/api/devices/add", post(add_device))
+        .route("/api/devices/:id/claim", post(claim_device))
+        .route("/api/devices/:id/diagnostics", post(enable_diagnostics))
         .route("/api/scan", post(scan))
         .route("/d/:id", get(proxy::redirect_device))
         .route("/d/:id/", any(proxy::proxy_root))
@@ -104,4 +109,23 @@ async fn add_device(
     let device = discovery::device_from_info(info, &ip, port, "manual");
     state.upsert(device.clone()).await;
     Ok(Json(device))
+}
+
+async fn claim_device(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(request): Json<ClaimRequest>,
+) -> Result<Json<Device>, (StatusCode, String)> {
+    claim::claim_device(&state, &id, &request.code)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))
+}
+
+async fn enable_diagnostics(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let url = proxy::enable_diagnostics(&state, &id).await?;
+    Ok(Json(serde_json::json!({ "url": url })))
 }
