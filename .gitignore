@@ -34,3 +34,4 @@ hardware/kicad/_autosave-*
 
 # CAD exports
 *.stl
+hub/target/

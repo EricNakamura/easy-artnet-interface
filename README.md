@@ -14,6 +14,7 @@ Este projeto resolve os problemas clássicos de rede em eventos ao vivo: não pe
 | Pasta | Conteúdo |
 | :--- | :--- |
 | `firmware/` | Sketches por variante de hardware (WT32-ETH01 e ESP32 + W5500) |
+| `hub/` | Hub local Rust (descoberta + proxy do painel); ver [hub/README.md](hub/README.md) |
 | `src/` | Entradas do PlatformIO; não editar |
 | `hardware/kicad/` | Esquema e PCB KiCad |
 | `hardware/cad/` | Modelos FreeCAD da caixa |
@@ -30,6 +31,7 @@ Este projeto resolve os problemas clássicos de rede em eventos ao vivo: não pe
   * Se ligado direto ao PC/Mac (sem router): **a placa transforma-se num Servidor DHCP automático** (Gama `10.0.0.x`), permitindo ligação imediata *Plug & Play*.
 * **Sem Conflito de Internet:** O servidor DHCP interno da placa desativa o envio de Gateway/DNS, permitindo que o Mac/PC continue a usar o Wi-Fi para aceder à internet (WhatsApp, navegação, etc.) enquanto controla a iluminação por cabo.
 * **Acesso por Nome (mDNS):** Aceda ao painel via `http://dmx-xxxxxx.local` (o sufixo único aparece no serial e no próprio painel; também pode usar o IP mostrado no painel).
+* **Hub local (MVP):** app Rust descobre a interface por mDNS/beacon/scan e abre o painel em `http://localhost:8080/d/<id>/`, sem `.local`/cloud; inclui claim code + HMAC no painel. Ver [hub/README.md](hub/README.md).
 * **Painel Web de Configuração:** Interface responsiva para alterar Universo Art-Net, alternar entre DHCP e IP Fixo.
 * **Proteção DMX Contínua (40 FPS / 25ms):** Se a rede falhar ou o software de luz fechar, o ESP32 continua a enviar a última cena DMX aos aparelhos, evitando apagões ou piscadelas no palco.
 * **Smart Factory Reset:** Reset de fábrica por ciclo de energia (ligar/desligar a placa 2 vezes seguidas rapidamente), eliminando a necessidade de botões físicos.
